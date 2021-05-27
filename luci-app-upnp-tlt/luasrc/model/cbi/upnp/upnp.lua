@@ -112,7 +112,7 @@ ac = s2:option(ListValue, "action", translate("Action"),translate("Allows or for
 ac:value("allow","Allow")
 ac:value("deny", "Deny")
 
-s3 = map:section(NamedSection, "", "", "Port Redirect Attempts");
+s3 = m:section(NamedSection, "", "", "Port Redirect Attempts");
 s3.template = "upnp_errors"
 
 return m
