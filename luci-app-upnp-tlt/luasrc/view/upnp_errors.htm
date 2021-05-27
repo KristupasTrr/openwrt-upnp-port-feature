@@ -1,0 +1,82 @@
+<%-
+
+local sys = require "luci.sys"
+local sqlite = require "lsqlite3"
+local dbPath = "/log/"
+local dbName = "upnp-errors.db"
+local dbFullPath = dbPath .. "" ..dbName
+messageList = {}
+
+local db = sqlite.open(dbFullPath)
+local query = "SELECT * FROM errors"
+local stmt = db:prepare(query)
+if stmt then
+    for row in db:nrows(query) do
+        messageList[#messageList+1] = row
+    end
+end
+db:close()
+
+-%>
+
+<script type="text/javascript">//<![CDATA[
+	function upnp_add_rule(idx) {
+		XHR.get('<%=luci.dispatcher.build_url("admin", "services", "upnp", "rule")%>/' + idx, null,
+			function(x)
+			{
+        var row = document.getElementById("row-" + idx);
+        row.parentNode.removeChild(row);
+			}
+		);
+	}
+//]]</script>
+
+<h3 class="content-title" onclick="toggleContent(this, '<%=self.config%>.<%=self.sectiontype%>.toggle')">
+    <div class="toggle-arrow expanded"><img src="<%=media%>/img/icons/arrow-toggle.svg"></div>
+    <span><%=self.title%></span>
+</h3>
+
+<div class="table-wrapper toggle-content">
+    <br><br>
+    <table>
+        <thead>
+            <th>
+				<label class="label-cell">External Port</label>
+			</th>
+            <th>
+				<label class="label-cell">Internal IP</label>
+			</th>
+            <th>
+				<label class="label-cell">Internal Port</label>
+			</th>
+          <th>
+        <label class="label-cell">Protocol</label>
+        </th>
+      <th>
+      <label class="label-cell">Error code</label>
+      </th>
+      <th>
+      <label class="label-cell">Attempts</label>
+      </th>
+      <th>
+        <label class="label-cell">Add rule</label>
+      </th>
+        </thead>
+        <tbody>
+            <% for i=1,#messageList do %>
+            <tr id="row-<%=messageList[i].id%>">
+                <td style="text-align: left;""><%=messageList[i].external_port%></td>
+                <td style="text-align: left;""><%=messageList[i].internal_ip%></td>
+                <td style="text-align: left;""><%=messageList[i].internal_port%></td>
+                <td style="text-align: left;""><%=messageList[i].protocol%></td>
+                <td style="text-align: left;""><%=messageList[i].error_code%></td>
+                <td style="text-align: left;""><%=messageList[i].attempts%></td>
+                <td style="text-align: left;""><input class="btn" type="button" value="Add" onclick="upnp_add_rule(<%=messageList[i].id%>)"></td>
+            </tr>
+            <% end %>
+        </tbody>
+
+    </table>
+
+</div>
+<br>

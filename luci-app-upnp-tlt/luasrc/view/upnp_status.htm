@@ -1,0 +1,97 @@
+<script type="text/javascript">//<![CDATA[
+	function upnp_delete_fwd(idx) {
+		XHR.get('<%=luci.dispatcher.build_url("admin", "services", "upnp", "delete")%>/' + idx, null,
+			function(x)
+			{
+				var tb = document.getElementById('upnp_status_table');
+				if (tb && (idx < tb.rows.length))
+					tb.rows[0].parentNode.removeChild(tb.rows[idx]);
+			}
+		);
+	}
+
+	XHR.poll(5, '<%=luci.dispatcher.build_url("admin", "services", "upnp", "status")%>', null,
+		function(x, st)
+		{
+			var tb = document.getElementById('upnp_status_table').getElementsByTagName("tbody")[0];
+			if (st && tb)
+			{
+				/* clear all rows */
+				// while( tb.rows.length > 1 )
+				// 	tb.deleteRow(1);
+				tb.innerHTML = ""
+
+				for( var i = 0; i < st.length; i++ )
+				{
+					var td;
+					var tr = document.createElement("tr")
+					tr.className = 'cbi-section-table-row cbi-rowstyle-' + ((i % 2) + 1);
+
+					td = document.createElement("td")
+					td.innerHTML = "<div class='div-heading'>Protocol</div>" + st[i].proto
+					tr.appendChild(td);
+
+
+					td = document.createElement("td")
+					td.innerHTML = "<div class='div-heading'>External Port</div>" + st[i].extport
+					tr.appendChild(td);
+
+					td = document.createElement("td")
+					td.innerHTML = "<div class='div-heading'>Client Address</div>" + st[i].intaddr
+					tr.appendChild(td);
+
+					td = document.createElement("td")
+					td.innerHTML = "<div class='div-heading'>Client Port</div>" + st[i].intport
+					tr.appendChild(td);
+
+					td = document.createElement("td")
+					td.innerHTML = String.format(
+						'<input class="btn" type="button" value="<%=translate("Delete Redirect")%>" onclick="upnp_delete_fwd(%d)" />',
+							st[i].num
+					);
+					tr.appendChild(td)
+
+					tb.appendChild(tr)
+				}
+				if( tb.childElementCount == 0 )
+				{
+
+					var tr = document.createElement("tr");
+					tr.className = 'cbi-section-table-row';
+					tr.innerHTML = '<td colspan=5 style="text-align: left" ><em><br /><%=translate("There are no active redirects.")%></em></td>';
+					tb.appendChild(tr)
+
+				}
+			}
+		}
+	);
+//]]></script>
+<h3 class="content-title <%=(#self.description > 0) and ' note-after hoverable' or ' '%>" onclick="toggleContent(this, '<%=self.config%>.<%=self.sectiontype%>.toggle')">
+	<div class="toggle-arrow expanded"><img src="<%=media%>/img/icons/arrow-toggle.svg"></div>
+	<span>
+	<%=self.title%>
+	<% if self.description and #self.description > 0 then %>
+		<div class="label-info"><%=self.description%></div>
+	<% end %>
+</span></h3>
+<div class=" table-wrapper toggle-content">
+	<!-- <fieldset class="cbi-section"> -->
+		<!-- <legend><%=translate("Active UPnP Redirects")%></legend> -->
+		<table class="cbi-section-table" id="upnp_status_table">
+			<thead>
+				<tr class="cbi-section-table-titles">
+					<th class="cbi-section-table-cell" width="10%" align="left"><%=translate("Protocol")%></th>
+					<th class="cbi-section-table-cell" align="left" width="20%"><%=translate("External Port")%></th>
+					<th class="cbi-section-table-cell" align="left" width="20%"><%=translate("Client Address")%></th>
+					<th class="cbi-section-table-cell" align="left" width="10%"><%=translate("Client Port")%></th>
+					<th class="cbi-section-table-cell">&#160;</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr class="cbi-section-table-row">
+					<td colspan="5" style="text-align: left;"><em><br /><%=translate("Collecting data...")%></em></td>
+				</tr>
+			</tbody>
+		</table>
+	<!-- </fieldset> -->
+</div>

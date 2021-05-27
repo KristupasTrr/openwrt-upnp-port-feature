@@ -1,0 +1,201 @@
+Index: miniupnpd-2.2.0/objects.mk
+===================================================================
+--- miniupnpd-2.2.0.orig/objects.mk
++++ miniupnpd-2.2.0/objects.mk
+@@ -3,7 +3,7 @@ BASEOBJS = miniupnpd.o upnphttp.o upnpde
+            upnpredirect.o getifaddr.o daemonize.o \
+            options.o upnppermissions.o minissdp.o natpmp.o pcpserver.o \
+            upnpglobalvars.o upnpevents.o upnputils.o getconnstatus.o \
+-           upnpstun.o upnppinhole.o pcplearndscp.o asyncsendto.o
++           upnpstun.o upnppinhole.o pcplearndscp.o asyncsendto.o upnperrordb.o
+ 
+ # sources in linux/ directory
+ LNXOBJS = getifstats.o ifacewatcher.o getroute.o
+Index: miniupnpd-2.2.0/upnperrordb.c
+===================================================================
+--- /dev/null
++++ miniupnpd-2.2.0/upnperrordb.c
+@@ -0,0 +1,102 @@
++#include <sqlite3.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++char *db_path = "/log/upnp-errors.db";
++
++sqlite3 *sql_open(char *dbpath) {
++    sqlite3 *db;
++    int rc;
++    rc = sqlite3_open(dbpath, &db);
++    if (rc)
++        fprintf(stderr, "ERROR: Can't open database: %s" , sqlite3_errmsg(db));
++
++    return db;
++}
++
++int sql_close(sqlite3 *db) {
++    return sqlite3_close(db);
++}
++
++int sql_check_table_existance(sqlite3 *db, char *table) {
++    int rc;
++    sqlite3_stmt *stmt;
++
++    char *sql = NULL;
++    asprintf(&sql, "SELECT COUNT(TYPE) FROM sqlite_master WHERE TYPE='table' AND NAME='%s';", table);
++
++    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
++    if (rc != SQLITE_OK) {
++        fprintf(stderr, "ERROR: Can't prepare stmt object\n)");
++        goto error;
++    }
++    sqlite3_step(stmt);
++    rc = sqlite3_column_int(stmt, 0);
++
++error:
++    free(sql);
++    sqlite3_finalize(stmt);
++
++    return rc;
++}
++
++int sql_add_table(sqlite3 *db, char *table) {
++    int rc;
++    char *err_msg = 0;
++    sqlite3_stmt *stmt;
++
++    char *sql = NULL;
++    asprintf(&sql, "CREATE TABLE %s (id INTEGER PRIMARY KEY AUTOINCREMENT, internal_ip TEXT NOT NULL, internal_port INTEGER NOT NULL, external_port INTEGER NOT NULL, protocol TEXT NOT NULL, error_code INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 1, CONSTRAINT con_fields UNIQUE(internal_ip,internal_port,external_port,protocol,error_code))", table);
++
++    rc = sqlite3_exec(db, sql, 0, NULL, &err_msg);
++    if (rc != SQLITE_OK) {
++        fprintf(stderr, "ERROR: Failed to add table. %s\n", err_msg);
++    }
++
++    free(sql);
++    sqlite3_finalize(stmt);
++    return rc;
++}
++
++int sql_add_message(char *table, int eport, char *int_ip, int iport, char *protocol, int error_code) {
++    int rc;
++    char *err_msg = 0;
++
++    sqlite3 *db = sql_open(db_path);
++    sqlite3_stmt *stmt = NULL;
++
++
++    rc = sql_check_table_existance(db, table);
++    if (rc == 0) {
++        fprintf(stdout, "INFO: Table does not exist\n");
++        rc = sql_add_table(db, table);
++        if (rc != SQLITE_OK) {
++            // print error
++            fprintf(stderr, "ERROR: Could not add table\n");
++            goto error;
++        }
++        fprintf(stdout, "SUCCESS: Table added\n");
++    } else if (rc != 1) {
++        fprintf(stderr, "ERROR: Received error while checking for table\n");
++        goto error;
++    } else {
++        fprintf(stdout, "INFO: Table exists\n");
++    }
++
++    char *sql = NULL;
++
++    asprintf(&sql, "INSERT INTO %s(internal_ip, internal_port, external_port, protocol, error_code) VALUES('%s', %d, %d, '%s', %d) ON CONFLICT(internal_ip,internal_port,external_port,protocol,error_code) DO UPDATE SET attempts = attempts + 1", table, int_ip, iport, eport, protocol, error_code);
++
++    rc = sqlite3_exec(db, sql, 0, NULL, &err_msg);
++    if (rc != SQLITE_OK) {
++        fprintf(stderr, "ERROR: Failed to add message. %s\n", err_msg);
++    }
++
++    fprintf(stdout, "SUCCESS: Created and added message \n");
++    free(sql);
++error:
++    sqlite3_finalize(stmt);
++    sql_close(db);
++
++    return rc;
++}
+Index: miniupnpd-2.2.0/upnperrordb.d
+===================================================================
+--- /dev/null
++++ miniupnpd-2.2.0/upnperrordb.d
+@@ -0,0 +1 @@
++upnperrordb.o upnperrordb.d: upnperrordb.c
+Index: miniupnpd-2.2.0/upnperrordb.h
+===================================================================
+--- /dev/null
++++ miniupnpd-2.2.0/upnperrordb.h
+@@ -0,0 +1 @@
++int sql_add_message(char *table, int eport, char *int_ip, int iport, char *protocol, int error_code);
+Index: miniupnpd-2.2.0/upnpsoap.c
+===================================================================
+--- miniupnpd-2.2.0.orig/upnpsoap.c
++++ miniupnpd-2.2.0/upnpsoap.c
+@@ -34,6 +34,7 @@
+ #include "getconnstatus.h"
+ #include "upnpurns.h"
+ #include "upnputils.h"
++#include "upnperrordb.h"
+ 
+ /* utility function */
+ static int is_numeric(const char * s)
+@@ -521,6 +522,12 @@ AddPortMapping(struct upnphttp * h, cons
+ 
+ 	r = upnp_redirect(r_host, eport, int_ip, iport, protocol, desc, leaseduration);
+ 
++	char protocol_to_sql[50];
++	char int_ip_to_sql[100];
++	strcpy(protocol_to_sql, protocol);
++	strcpy(int_ip_to_sql, int_ip);
++
++
+ 	ClearNameValueList(&data);
+ 
+ 	/* possible error codes for AddPortMapping :
+@@ -554,18 +561,22 @@ AddPortMapping(struct upnphttp * h, cons
+ 		break;
+ 	case -4:
+ #ifdef IGD_V2
++		sql_add_message("errors", eport, int_ip_to_sql, iport, protocol_to_sql, 729);
+ 		SoapError(h, 729, "ConflictWithOtherMechanisms");
+ 		break;
+ #endif /* IGD_V2 */
+ 	case -3:	/* not permitted */
+ #ifdef IGD_V2
++		sql_add_message("errors", eport, int_ip_to_sql, iport, protocol_to_sql, 606);
+ 		SoapError(h, 606, "Action not authorized");
+ 		break;
+ #endif /* IGD_V2 */
+ 	case -2:	/* already redirected */
++		sql_add_message("errors", eport, int_ip_to_sql, iport, protocol_to_sql, 718);
+ 		SoapError(h, 718, "ConflictInMappingEntry");
+ 		break;
+ 	default:
++		sql_add_message("errors", eport, int_ip_to_sql, iport, protocol_to_sql, 501);
+ 		SoapError(h, 501, "ActionFailed");
+ 	}
+ }
+@@ -2386,9 +2397,10 @@ SoapError(struct upnphttp * h, int errCo
+ 	char body[2048];
+ 	int bodylen;
+ 
++	//sql_add_message("errors", h->clientaddr->s_addr, h->socket, iport, "TCP", errCode);
++
+ 	syslog(LOG_INFO, "Returning UPnPError %d: %s", errCode, errDesc);
+ 	bodylen = snprintf(body, sizeof(body), resp, errCode, errDesc);
+ 	BuildResp2_upnphttp(h, 500, "Internal Server Error", body, bodylen);
+ 	SendRespAndClose_upnphttp(h);
+ }
+-
+Index: miniupnpd-2.2.0/upnpsoap.d
+===================================================================
+--- /dev/null
++++ miniupnpd-2.2.0/upnpsoap.d
+@@ -0,0 +1,4 @@
++upnpsoap.o upnpsoap.d: upnpsoap.c macros.h config.h upnpglobalvars.h \
++ upnppermissions.h miniupnpdtypes.h upnphttp.h upnpsoap.h \
++ upnpreplyparse.h upnpredirect.h upnppinhole.h getifaddr.h getifstats.h \
++ getconnstatus.h upnpurns.h upnputils.h upnperrordb.h
